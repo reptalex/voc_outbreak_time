@@ -2,8 +2,7 @@
 .Rhistory
 .Rapp.history
 
-*docs
-docs/*
+.docx
 
 # Session Data files
 .RData
