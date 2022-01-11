@@ -16,14 +16,13 @@ source("scripts/delta_omicron_utils.R")
 
 # Settings & params -------------------------------------------------------
 
-county_population_threshold <- 1e6
+# county_population_threshold <- 1e6 # Can be useful when conducting county-level analyses whose 
+                                    ## oultier detection + growth rate estimation are time-consuming
 theme_set(theme_bw(base_size=12))
 ncores=6
-disps <- read.csv('data/precomputed_dispersion.csv')
-disps_deaths <- read.csv('data/precomputed_dispersion_deaths.csv')
 
 
-# Outlier detection fcns --------------------------------------------
+# Initialize cluster for parallelized outlier detection --------------------------------------------
 
 cl <- makeCluster(ncores)
 clusterEvalQ(cl,expr = {library(tsoutliers)
@@ -33,7 +32,6 @@ clusterExport(cl,'outlier_detection')
 
 
 # Countries ---------------------------------------------------------------
-
 
 World <- covid19() %>% as.data.table
 
@@ -47,12 +45,11 @@ World <- World[date>=as.Date('2020-10-01')]
 
 ######### Outlier removal
 World[,new_confirmed:=outlier_detection_par(new_confirmed,country,cl)]
-
-#### Remove major anomaly in Israeli trajecotry
-World[country=='Israel' & date %in% as.Date(c('2021-09-06','2021-09-07','2021-09-08')),new_confirmed:=NA]
-World[country=='Israel' & date %in% as.Date(c('2021-09-06','2021-09-07','2021-09-08')),new_deaths:=NA]
-
 World <- covid19_nbss(World,mc.cores = ncores) %>% as.data.table
+## Note of acknowledgement: Justin Silverman wrote the covid19_nbss function for our earlier work
+## analyzing COVID outbreaks on a timescale of burden. He's an exceptionally talented statistician
+## and his functions have proven useful throughout the pandemic, allowing growth rate estimation
+## to be standardized, with filtering/smoothign made easy. Give him all your grants! :-D
 
 # US states ---------------------------------------------------------------
 
@@ -66,10 +63,12 @@ US_states <- US_states[date>as.Date('2021-04-01')]
 
 ### some states changed their reporting practices after the B 1.1.7 wave to not report at all on e.g. weekends.
 ### Below isn't a perfect fix, but hopefully helps the algorithm converge to reliable growth rate estimates for recent weeks.
+### We make an additional fix later by separately estimating growth rates for Delta & Omicron waves.
 US_states[date>as.Date('2021-06-01') & new_confirmed==0,new_confirmed:=NA]
 US_states[date>as.Date('2021-06-01') & new_deaths==0,new_deaths:=NA]
 
-US_states[state=='Nevada' & date==as.Date('2021-10-06'),new_confirmed:=NA] ## Nevada outliers not picked up well by outlier_detection
+US_states[state=='Nevada' & date==as.Date('2021-10-06'),new_confirmed:=NA] 
+## Nevada outlier not picked up well by outlier_detection
 thanksgiving <- c(seq(as.Date('2020-11-26'),as.Date('2020-11-27'),by='day'),
                   seq(as.Date('2021-11-25'),as.Date('2021-11-29'),by='day'))
 christmas <- as.Date(c('2020-12-25','2020-12-26'))
@@ -79,7 +78,7 @@ lbr <- as.Date(c('2021-09-06','2021-09-07'))
 ipd <- as.Date(c('2021-10-11','2021-10-12'))
 hlwn <- as.Date(c('2021-10-30','2021-10-31','2021-11-01'))
 ind_day <- seq(as.Date('2021-07-03'),as.Date('2021-07-06'),by='day')
-US_states[state=='Missouri' & new_confirmed>4e4,new_confirmed:=NA]
+US_states[state=='Missouri' & new_confirmed>4e4 & date<as.Date('2021-05-01'),new_confirmed:=NA] ## Missouri outlier
 
 #### Outlier removal
 US_states[,new_confirmed:=outlier_detection_par(new_confirmed,state,cl)]
@@ -98,7 +97,7 @@ US_states[,hosp_gr:=nbs(hosp,dispersion=1),by=state]
 
 # Populous US counties ----------------------------------------------------
 
-### This takes a little bit longer.
+### This takes a little bit longer. 
 
 # US_counties <- covid19("United States",level=3) %>% as.data.table
 # US_counties[,country:=administrative_area_level_1]
@@ -111,9 +110,8 @@ US_states[,hosp_gr:=nbs(hosp,dispersion=1),by=state]
 # US_counties <- US_counties[population>=county_population_threshold]
 # 
 # US_counties[,new_confirmed:=outlier_detection_par(new_confirmed,lbl,cl)]
-# US_counties[,new_deaths:=outlier_detection_par(new_deaths,lbl,cl)]
 # 
-# US_counties <- covid19_nbss(US_counties,precomputed_dispersions = disps,mc.cores = ncores)
+# US_counties <- covid19_nbss(US_counties,mc.cores = ncores)
 
 
 # South African Provinces -------------------------------------------------
@@ -139,6 +137,7 @@ save(list=ls(),file='data/outbreak_duration_workspace.Rd')
 
 # Delta wave classification -----------------------------------------------------
 
+### name "surge/decline/peak/valley" - used here to ID valleys for outbreak start-dates.
 trend_namer <- function(r){
   y <- sign(r)
   dy <- shift(y)
@@ -159,6 +158,8 @@ trend_namer <- function(r){
   return(wave_category)
 }
 
+### Michigan's case reporting is very abnormal. This is what we've used for Michigan, even though Michigan
+### doesn't play a prominent role in our current analyses + correspondence.
 michigan_namer <- function(x){
   nas <- min(which(!is.na(x)))-1
   
@@ -187,6 +188,7 @@ michigan_namer <- function(x){
   return(wave_category)
 }
 
+### Delta wave finder - valley with the lowest mean_position within the date range [min_date,max_date]
 delta_wave_finder <- function(date,mean_position,wave,min_date=as.Date('2021-04-01'),max_date=Inf){
   valleys <- which(wave=='valley' & date>=min_date & date<=max_date)
   if (length(valleys)==1){
@@ -199,46 +201,70 @@ delta_wave_finder <- function(date,mean_position,wave,min_date=as.Date('2021-04-
 
 World[,wave:=trend_namer(growth_rate),by=country]
 US_states[,wave:=trend_namer(growth_rate),by=state]
-# US_counties[,wave:=trend_namer(growth_rate),by=c('state','county')]
 US_states[state=='Michigan',wave:=michigan_namer(new_confirmed)]
 
-# World[,delta_wave:=date>=max(date[wave=='valley']),by=country]
 
 World[,delta_wave:=delta_wave_finder(date,mean_position,wave,max_date = as.Date('2021-09-01')),by=country]
 
-World[country %in% c('India','Vietnam','Thailand','Malaysia','South Africa'),
+World[country %in% c('India','South Africa'),
       delta_wave:=delta_wave_finder(date,mean_position,wave,min_date=as.Date('2021-02-01'),max_date=as.Date('2021-11-01')),
       by=country]
 World[country=='South Africa' & date<as.Date('2021-04-24'),delta_wave:=FALSE]
-### visual inspection of South Africa's growth rates, estimated with filtering=TRUE,
-### suggest there's considerable uncertainty in the start-date of the SA Delta outbreak.
-### 4-24-2021 is the date when growth rates accelerated after a short deceleration since 4-05, the automated start-date.
 
-World[country=='Czech Republic',delta_wave:=NA]
-# US_states[,delta_wave:=date>=max(date[wave=='valley'],na.rm=T),by=state]
+##### A note on Delta wave classification in South Africa #####
+### Visual inspection of South Africa's growth rates, estimated with filtering=TRUE, show a period of 
+### rising growth rates starting early April followed by decelerations ending near Freedom day prior to the bulk of their Delta outbreak.
+### This early wobble in growth rates produces uncertainty in the start-date of the SA Delta outbreak.
+### In South Africa, the lowest valley of cases occured on 4/9/21, accelerated, then decelerated, then almost reached another saddle
+### in late Paril. By 5-01-2021, cases growth rates were sustained & accelerating up to the peak of cases in the SA Delta wave.
+### This wobbling growth rate is clearly impacted by Freedom Day reporting blips around 4-27-2021,
+### yet there was also a clear deceleration of growth rate prior to Freedom day starting 4-14-21.
+
+### This unfortunate timing of the South African Delta outbreak's start-date adds uncertainty about
+### the exact timing of the SA Delta outbreak. Our cutoff of 4-24 was inspired by the hockey-stick start of Delta-like growth in cases
+### visible in the scatter plot below.
+
+##### Plot of South African cases & growth rates, highlighting uncertainty of Delta outbreak start-date
+ggarrange(
+  
+  ggplot(World[country=='South Africa' & date<as.Date('2021-08-01') & date>as.Date('2021-03-01')],
+         aes(date,new_confirmed,color=delta_wave,fill=delta_wave))+
+    geom_point(cex=4)+scale_y_continuous(trans='log')+
+    geom_vline(xintercept = as.Date(c('2021-04-09','2021-4-27')))+
+    geom_vline(xintercept = as.Date(c('2021-04-24')),lty=2),
+  
+  ggplot(World[country=='South Africa' & date<as.Date('2021-08-01') & date>as.Date('2021-03-01')],aes(date,growth_rate,color=delta_wave))+
+    geom_line(lwd=2)+
+    geom_vline(xintercept = as.Date(c('2021-04-09','2021-4-27')))+
+    geom_vline(xintercept = as.Date(c('2021-04-24')),lty=2)+
+    geom_hline(yintercept = 0),
+  
+nrow=2,align='v')
+
+### These dates are chosen to cut off the US Alpha wave from impacting our estimation.
 US_states[,delta_wave:=delta_wave_finder(date,mean_position,wave,
                                          min_date=as.Date('2021-04-18'),
                                          max_date=as.Date('2021-09-01')),by=state]
-# US_counties[,delta_wave:=delta_wave_finder(date,mean_position,wave,
-                                           # min_date=as.Date('2021-04-18'),
-                                           # max_date=as.Date('2021-09-01')),by=c('state','county')]
-# US_counties[lbl=='Alabama,Jefferson',latest_wave:=date>=max(date[wave=='valley'])]
 
-ggplot(US_states[date<as.Date('2021-11-01')],aes(date,new_confirmed,color=delta_wave,fill=delta_wave))+
+### Visual sanity-checking of US Delta outbreak classifications
+ggplot(US_states[date<as.Date('2021-11-23')],aes(date,new_confirmed,color=delta_wave,fill=delta_wave))+
   geom_bar(stat='identity')+
   facet_wrap(.~state,scales = 'free_y')
 
+### the same, but for early Delta outbreaks in India, UK and South Africa.
 ggplot(World[date<as.Date('2021-11-01')],aes(date,new_confirmed,color=delta_wave,fill=delta_wave))+
   geom_bar(stat='identity')+
   facet_wrap(.~country,scales = 'free_y')
 
+
+### Delta outbreak time, t_Delta
 US_states[delta_wave==TRUE,t_Delta:=1:.N,by=state]
-US_counties[delta_wave==TRUE,t_Delta:=1:.N,by=c('state','county')]
 World[delta_wave==TRUE,t_Delta:=1:.N,by=country]
 
 
 # Omicron wave classification -----------------------------------------------------------------
 
+### First date with at least mn_growth_time successive days of positive case growth rates.
 za_omicron_wave <- function(r,date,min_date=as.Date('2021-11-10'),max_date=as.Date('2021-12-20'),mn_growth_time=10){
   y <- rep(FALSE,length(r))
   
@@ -246,6 +272,10 @@ za_omicron_wave <- function(r,date,min_date=as.Date('2021-11-10'),max_date=as.Da
   y[min(ix):length(y)] <- TRUE
   return(y)
 }
+
+### US outbreak rule, tricker due to ongoing non-Omicron case rises in some states prior to arrival of Omicron.
+### We use Omicron's characteristically faster-than-delta growth to ID Omicron outbreaks, and then start at the 
+### most recent date when r<=r_start with r_start=0.02. This rule applies only to outbreaks after mn_date.
 us_omicron <- function(r,date,new_confirmed,r_threshold=0.125,r_start=0.02,mn_date=as.Date('2021-11-15')){
   if (!any(r[!is.na(r)]>r_threshold & date[!is.na(r)]>mn_date)){
     y <- rep(FALSE,length(r))
@@ -257,10 +287,12 @@ us_omicron <- function(r,date,new_confirmed,r_threshold=0.125,r_start=0.02,mn_da
   return(y)
 }
 
+#### South African omicron wave classification.
 ZA[,omicron:=za_omicron_wave(growth_rate,date),by=province]
 ZA[omicron==TRUE,t_omicron:=1:.N,by=province]
-ZA[,state:=province]
+ZA[,state:=province] ### this makes ggplotting easier later.
 
+#### US state omicron wave classification
 US_states[,omicron:=us_omicron(growth_rate,date,exp(mean_position)),by=state]
 US_states[omicron==TRUE,t_omicron:=1:.N,by=state]
 US_states[,any_omicron:=any(omicron==TRUE),by=state]
@@ -269,26 +301,20 @@ US_states[,tt:=date-max(date,na.rm=T)+max(t_omicron,na.rm=T),by=state]
 US_states[any_omicron==TRUE & tt>= -21,gr:=nbs(new_confirmed,filtering=TRUE,remove_outliers=FALSE),by=state]
 US_states[any_omicron==TRUE & tt>= -21,hgr:=nbs(hosp,filtering=TRUE,remove_outliers=FALSE),by=state]
 
+### Plotting key early US Omicron outbreaks
+ggarrange(
 ggplot(US_states[state %in% c('District of Columbia','Puerto Rico','Hawaii') & date>as.Date('2021-11-15')],aes(date,new_confirmed))+
   geom_bar(stat='identity',aes(color=omicron,fill=omicron))+
-  facet_wrap(.~state,scales='free_y')
-
+  facet_wrap(.~state,scales='free_y'),
 ggplot(US_states[state %in% c('District of Columbia','Puerto Rico','Hawaii') & date>as.Date('2021-11-15')],aes(date,gr))+
   geom_line(aes(color=omicron))+
-  facet_wrap(.~state,scales='free_y')
-
-# nyc <- US_counties[county=='New York City']
-# nyc[date>=as.Date('2021-12-01'),t_omicron:=1:.N]
-# nyc[date>=as.Date('2021-11-01'),gr:=nbs(new_confirmed,filtering=TRUE,remove_outliers=FALSE)]
-# nyc[,state:='NYC']
-
-
-
+  facet_wrap(.~state,scales='free_y'),
+nrow=2,align='v')
 
 # Delta outbreak comparisons  -------------------------------------------------------------------
 
-first_peak <- function(t,r,n=5){ t[min(which(cumsum(r<0)*(r<0)>=n))-n+1]}
-
+### The function below, first_peak, is used to label the dates of first peak for plotting + labelling.
+### "peak" for Delta outbreaks was defined by first point at which case growth rates were negative for at least 7 days.
 first_peak <- function(t,r,n_min=7){
   ids <- data.table('ix'=1:length(r),'sgn'=sign(r),'id'=rleid(sign(r)))
   ids[,n:=.N,by=id]
@@ -297,7 +323,6 @@ first_peak <- function(t,r,n_min=7){
 
 World[delta_wave==TRUE,first_delta_peak:=first_peak(t_Delta,growth_rate),by=country]
 US_states[delta_wave==TRUE,first_delta_peak:=first_peak(t_Delta,growth_rate),by=state]
-
 
 
 delta_cls <- viridis::plasma(4)
@@ -352,12 +377,7 @@ g_delta_us <- ggplot(US_states[delta_wave==TRUE & t_Delta <90 & !state %in% c('P
   ggtitle('Delta Outbreaks: US States')
 
 
-# ggarrange(g_delta_early,g_delta_us,ncol=2,align='h')
-
-
-
 # Omicron outbreak comparisons --------------------------------------------
-
 
 g_omicron_za <- ggplot(ZA[omicron==TRUE & date<as.Date('2021-12-17')],aes(t_omicron,growth_rate))+
     geom_line(lwd=2,col='orange',alpha=0.3,aes(group=province))+
@@ -402,6 +422,11 @@ ggarrange(g_omicron_za,g_omicron_us,ncol=2,align='h',labels=c('C','D')),nrow=2)
 ggsave('figures/voc_outbreak_durations.png',height=10,width=14)
 
 
+# Comparing Delta & Omicron -----------------------------------------------
+
+#### In the script below, we combine UK, India, South Africa and US states for Delta outbreaks
+#### and we combine South African provinces + US states for Omicron outbreaks.
+#### We then compute mean +/- 2sd growth rates as a function of outbreak time & plot to compare Delta vs. Omicron.
 ZA[,gr:=growth_rate]
 Omics <- rbind(ZA[omicron==TRUE & date<as.Date('2022-12-20'),c('t_omicron','gr','id')][t_omicron<40],
                US_states[omicron==TRUE,c('t_omicron','gr','id')])
@@ -428,7 +453,7 @@ trnd=ggplot(data=d[!is.na(sd)],aes(time,growth_rate,color=outbreak))+
 
 
 
-
+# Combining all plots ----------------------------------------------------
 ggarrange(
   ggarrange(g_delta_early,g_delta_us,ncol=2,align='h',labels=c('A','B')),
   ggarrange(g_omicron_za,g_omicron_us,ncol=2,align='h',labels=c('C','D')),

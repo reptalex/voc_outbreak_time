@@ -19,22 +19,12 @@ library(mgcv)
 ### A longer version of these functions is available at
 # https://github.com/reptalex/COVID_ERL
 
-
+### function to compute new confirmed/deaths from cumulative
 dfs <- function(x){
   x <- c(x[1],diff(x))
   x[x<0] <- NA
   return(x)
 }
-# 
-# 
-# # Requires to get sockets parallization to work on os x. 
-# library(rstudioapi)
-# if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
-#     Sys.info()["sysname"] == "Darwin" && getRversion() >= "4.0.0") {
-#   if(versionInfo()$version < "1.3.1056"){
-#     parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
-#   }
-# }
 
 ### Simplest wrapper - negaive binomial state space model for "x", returning only a specified parameter in "name".
 nbs <- function(x,name='growth_rate',remove_initial_zeros=TRUE,...){
@@ -52,7 +42,9 @@ nbs <- function(x,name='growth_rate',remove_initial_zeros=TRUE,...){
   return(y)
 }
 
-### nb state-space model for time-series x. Options to remove outliers, smoothing/filtering estimates, and input precomputed disperson. 
+### nb state-space model for time-series x. Options to remove outliers, smoothing/filtering estimates, and input precomputed disperson.
+### Many more outputs than just "growth_rate" and "mean_position" are included should you be interested. Thanks to Justin Silverman 
+### for writing the first version of these nbss functions in early 2020 that have proven useful for estimating growth rates throughout the pandemic!
 nbss <- function(x,remove_outliers=TRUE,filtering=TRUE,dispersion=NULL){
   nb_model <- function(x, pars){
     model_nb <- SSModel(x ~ SSMtrend(2, Q=list(0, NA),
@@ -121,21 +113,6 @@ nbss <- function(x,remove_outliers=TRUE,filtering=TRUE,dispersion=NULL){
   return(out)
 }
 
-# Main Model function -- CALL THIS 
-# dat should be a data.frame for a single region to be modeled 
-#    with column "new_confirmed" which is count data
-#    arranged by date (increasing)
-#
-# return_fit=TRUE is for debugging mostly. 
-#
-# any other columns in dat are included in output of this function. 
-# 
-# 
-# in addition the following key variables are included as model output
-#   growth_rate == exponential growth rate
-#   pX_Y is quantile X for the quantitly Y
-#   mean_ is the mean of the quantity Y
-#   z_score_growth_rate = growth_rate/sd_growth_rate
 fit_covid_ssm <- function(d, series="new_confirmed", precomputed_dispersions=NULL,
                           return_fit=FALSE,maxiter=200,filtering=FALSE){
   dat <- d
