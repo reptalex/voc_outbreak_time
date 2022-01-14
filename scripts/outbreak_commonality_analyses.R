@@ -18,7 +18,7 @@ source("scripts/delta_omicron_utils.R")
 
 # county_population_threshold <- 1e6 # Can be useful when conducting county-level analyses whose 
                                     ## oultier detection + growth rate estimation are time-consuming
-theme_set(theme_bw(base_size=12))
+theme_set(theme_bw(base_size=15))
 ncores=6
 
 
@@ -243,7 +243,7 @@ nrow=2,align='v')
 
 ### These dates are chosen to cut off the US Alpha wave from impacting our estimation.
 US_states[,delta_wave:=delta_wave_finder(date,mean_position,wave,
-                                         min_date=as.Date('2021-04-18'),
+                                         min_date=as.Date('2021-06-01'),
                                          max_date=as.Date('2021-09-01')),by=state]
 
 ### Visual sanity-checking of US Delta outbreak classifications
@@ -276,7 +276,7 @@ za_omicron_wave <- function(r,date,min_date=as.Date('2021-11-10'),max_date=as.Da
 ### US outbreak rule, tricker due to ongoing non-Omicron case rises in some states prior to arrival of Omicron.
 ### We use Omicron's characteristically faster-than-delta growth to ID Omicron outbreaks, and then start at the 
 ### most recent date when r<=r_start with r_start=0.02. This rule applies only to outbreaks after mn_date.
-us_omicron <- function(r,date,new_confirmed,r_threshold=0.125,r_start=0.02,mn_date=as.Date('2021-11-15')){
+us_omicron <- function(r,date,new_confirmed,r_threshold=0.125,r_start=0.027,mn_date=as.Date('2021-11-15')){
   if (!any(r[!is.na(r)]>r_threshold & date[!is.na(r)]>mn_date)){
     y <- rep(FALSE,length(r))
   } else {
@@ -328,8 +328,8 @@ US_states[delta_wave==TRUE,first_delta_peak:=first_peak(t_Delta,growth_rate),by=
 delta_cls <- viridis::plasma(4)
 g_delta_early <- ggplot(World[country %in% c("United Kingdom",'India','South Africa') & t_Delta<(first_delta_peak+5)],aes(t_Delta,growth_rate))+
   geom_line(aes(color=country),lwd=2)+
-  scale_y_continuous('Growth Rate',limits=c(-0.05,0.4))+
-  scale_x_continuous('Outbreak Time',limits=c(0,90))+
+  scale_y_continuous('Exponential Growth Rate',limits=c(-0.1,0.4))+
+  scale_x_continuous(NULL,limits=c(0,90))+
   geom_hline(yintercept=0)+
   annotate(geom='segment',x = 80,y=0.12,
            xend = World[country=='India' & t_Delta==first_delta_peak,t_Delta],
@@ -356,8 +356,8 @@ us_cls <- c('darkred','darkgreen')
 g_delta_us <- ggplot(US_states[delta_wave==TRUE & t_Delta <90 & !state %in% c('Puerto Rico','District of Columbia')],aes(t_Delta,growth_rate))+
   geom_line(data=World[country %in% c("United Kingdom",'India','South Africa') & t_Delta<(first_delta_peak+4)],aes(color=country),lwd=2,alpha=0.6)+
   scale_color_manual(values=c(us_cls[1],delta_cls[1],us_cls[2],delta_cls[2:3]))+
-  scale_y_continuous('Growth Rate',limits=c(-0.05,0.4))+
-  scale_x_continuous('Outbreak Time',limits=c(0,90))+
+  scale_y_continuous(NULL,limits=c(-0.1,0.4))+
+  scale_x_continuous(NULL,limits=c(0,90))+
   geom_line(aes(group=state),lwd=2,col=rgb(0,0,0,0.1))+
   theme(legend.position='none')+
   geom_line(data=US_states[delta_wave==TRUE & t_Delta<90 & state %in% c('Arkansas','Missouri')],aes(color=state),lwd=2.5)+
@@ -384,13 +384,13 @@ g_omicron_za <- ggplot(ZA[omicron==TRUE & date<as.Date('2021-12-17')],aes(t_omic
     geom_line(data=ZA[omicron==TRUE & province=='Gauteng' & date<as.Date('2021-12-17')],col='brown1',lwd=2)+
     geom_smooth(col='orange',lwd=2)+
     ggtitle('Omicron Outreaks: RSA Provinces Prior to 12/21/25')+
-    scale_y_continuous('Growth Rate',limits=c(-0.1,0.4))+
+    scale_y_continuous('Exponential Growth Rate',limits=c(-0.1,0.4))+
     geom_hline(yintercept = 0)+
     annotate(geom='segment',x = 62,y=0.25,
              xend = ZA[province=='Gauteng' & date==as.Date('2021-12-16'),t_omicron],
              yend=ZA[province=='Gauteng' & date==as.Date('2021-12-16'),growth_rate],col='brown1')+
     annotate(geom='label',x=62,y=0.25,label='Gauteng peak: \n 12/16/21',col='white',fill='brown1',size=5)+
-  scale_x_continuous('Outbreak Time',limits=c(0,90))
+  scale_x_continuous('Outbreak Time (days)',limits=c(0,90))
 state_cls <- c('purple','darkgreen')
 g_omicron_us <- ggplot(US_states[omicron==TRUE],aes(t_omicron,gr))+
     geom_smooth(data=ZA[omicron==TRUE & date<as.Date('2021-12-25')],aes(y=growth_rate),col='orange',lwd=2)+
@@ -399,7 +399,7 @@ g_omicron_us <- ggplot(US_states[omicron==TRUE],aes(t_omicron,gr))+
     # geom_line(aes(y=hgr,group=state),col='steelblue',lwd=2,alpha=0.4)+
     # geom_smooth(data=US_states[omicron==TRUE & t_omicron>10],aes(y=hgr),col='steelblue',lwd=2)+
     ggtitle('Omicron Outbreaks: US States')+
-    scale_y_continuous('Growth Rate',limits=c(-0.1,0.4))+
+    scale_y_continuous(NULL,limits=c(-0.1,0.4))+
     geom_point(data=US_states[state %in% c('District of Columbia','Puerto Rico') & t_omicron==max(t_omicron,na.rm=T)])+
     geom_hline(yintercept=0)+
     geom_line(data=US_states[state %in% c('District of Columbia','Puerto Rico')],lwd=2,aes(group=state,color=state))+
@@ -415,7 +415,7 @@ g_omicron_us <- ggplot(US_states[omicron==TRUE],aes(t_omicron,gr))+
   annotate(geom='label',x=50,y=0.15,label='PR peak: \n 1/5/22',col='white',fill=state_cls[2],size=5)+
   scale_color_manual(values=state_cls)+
   theme(legend.position='none')+
-  scale_x_continuous('Outbreak Time',limits=c(0,90))
+  scale_x_continuous('Outbreak Time (days)',limits=c(0,90))
 ggarrange(
 ggarrange(g_delta_early,g_delta_us,ncol=2,align='h',labels=c('A','B')),
 ggarrange(g_omicron_za,g_omicron_us,ncol=2,align='h',labels=c('C','D')),nrow=2)
@@ -428,17 +428,22 @@ ggsave('figures/voc_outbreak_durations.png',height=10,width=14)
 #### and we combine South African provinces + US states for Omicron outbreaks.
 #### We then compute mean +/- 2sd growth rates as a function of outbreak time & plot to compare Delta vs. Omicron.
 ZA[,gr:=growth_rate]
-Omics <- rbind(ZA[omicron==TRUE & date<as.Date('2022-12-20'),c('t_omicron','gr','id')][t_omicron<40],
-               US_states[omicron==TRUE,c('t_omicron','gr','id')])
+ZA[,country:='South Africa']
+World[,state:=NA]
+US_states[,country:="USA"]
+
+Omics <- rbind(ZA[omicron==TRUE & date<as.Date('2022-12-20'),c('date','t_omicron','gr','id','country','state','new_confirmed')][t_omicron<40],
+               US_states[omicron==TRUE,c('date','t_omicron','gr','id','country','state','new_confirmed')])
 Omics[,growth_rate:=gr]
 Omics[,outbreak:='Omicron']
 Omics[,time:=t_omicron]
-Deltas <- rbind(World[t_Delta<(first_delta_peak+5),c('t_Delta','growth_rate','id')],
-                US_states[t_Delta<=90,c('t_Delta','growth_rate','id')])
+Deltas <- rbind(World[t_Delta<(first_delta_peak+5),c('date','t_Delta','growth_rate','id','country','state','new_confirmed')],
+                US_states[t_Delta<=90,c('date','t_Delta','growth_rate','id','country','state','new_confirmed')])
 Deltas[,outbreak:='Delta']
 Deltas[,time:=t_Delta]
 
-DD <- rbind(Omics[,c('time','growth_rate','outbreak','id')],Deltas[,c('time','growth_rate','outbreak','id')])
+DD <- rbind(Omics[,c('date','time','growth_rate','outbreak','id','country','state','new_confirmed')],
+            Deltas[,c('date','time','growth_rate','outbreak','id','country','state','new_confirmed')])
 
 d <- DD[,list('growth_rate'=mean(growth_rate,na.rm=T),
               'sd'=sd(growth_rate,na.rm=T)),by=c('outbreak','time')]
@@ -447,9 +452,10 @@ trnd=ggplot(data=d[!is.na(sd)],aes(time,growth_rate,color=outbreak))+
   geom_hline(yintercept = 0)+
   geom_line(lwd=2)+
   geom_ribbon(aes(fill=outbreak,ymin=growth_rate-2*sd,ymax=growth_rate+2*sd),alpha=0.3)+
+  scale_y_continuous('Exponential Growth Rate')+
   theme(legend.position=c(0.5,.8))+
   ggtitle('Omicron vs Delta Outbreak Comparison')+
-  scale_x_continuous(limits=c(0,90))
+  scale_x_continuous('Outbreak Time (days)',limits=c(0,90))
 
 
 
@@ -459,3 +465,9 @@ ggarrange(
   ggarrange(g_omicron_za,g_omicron_us,ncol=2,align='h',labels=c('C','D')),
   trnd,nrow=3,labels=c(NA,NA,'E'))
 ggsave('figures/voc_outbreak_durations_2.png',height=16,width=14)
+
+
+
+# saving some useful objects ----------------------------------------------
+saveRDS(DD,file='data/outbreak_data_table.Rds')
+write.csv(DD,file='data/outbreak_data_table.csv')
